@@ -48,6 +48,11 @@
 
 
 /**********************/
+/* Chugin Version     */
+/**********************/
+#define VERSION "1.0.0"
+
+/**********************/
 /* from core.h        */
 /**********************/
 
@@ -144,7 +149,6 @@ s16 LINEARINTERPRV(const s16* buf, int basei, int wobpos) { // read buf[basei-wo
 }
 
 
-
 /**********************/
 /* the chugin impl.   */
 /**********************/
@@ -170,6 +174,8 @@ CK_DLL_MFUN( plinkyrev_getSend );
 
 CK_DLL_MFUN( plinkyrev_setMix );
 CK_DLL_MFUN( plinkyrev_getMix );
+
+CK_DLL_SFUN( plinkyrev_getVersion );
 
 // for chugins extending UGen, this is mono synthesis function for 1 sample
 CK_DLL_TICKF( plinkyrev_tickf );
@@ -674,6 +680,9 @@ CK_DLL_QUERY( PlinkyRev )
   QUERY->add_mfun( QUERY, plinkyrev_getMix, "float", "mix" );
   QUERY->doc_func(QUERY, "Get reverb wet/dry mix, 0 is dry, 1 is wet [0-1].");
 
+  QUERY->add_sfun( QUERY, plinkyrev_getVersion, "string", "version" );
+  QUERY->doc_func(QUERY, "Get version of PlinkyRev chugin.");  
+
   // this reserves a variable in the ChucK internal class to store
   // referene to the c++ class we defined above
   plinkyrev_data_offset = QUERY->add_mvar( QUERY, "int", "@pr_data", false );
@@ -864,4 +873,9 @@ CK_DLL_MFUN(plinkyrev_getMix)
 
   // call getMix() and set the return value
   RETURN->v_float = pr_obj->getMix();
+}
+
+CK_DLL_SFUN(plinkyrev_getVersion)
+{
+  RETURN->v_string = (Chuck_String*)API->object->create_string(VM, VERSION, false);
 }
