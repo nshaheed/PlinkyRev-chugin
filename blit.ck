@@ -1,10 +1,9 @@
 @import "PlinkyRev"
 
 // patch
-Blit s => PlinkyRev r => dac;
+Blit s => Pan2 p => PlinkyRev r(0.65) => dac;
 // Blit s => dac;
 .5 => s.gain;
-// .05 => r.mix;
 
 // an array
 [ 0, 2, 4, 7, 9, 11 ] @=> int hi[];
@@ -20,6 +19,8 @@ while( true )
 
     // harmonics
     Math.random2( 1, 5 ) => s.harmonics;
+
+    Math.random2f(-0.5, 0.5) => p.pan;
 
     // advance time
     120::ms => now;
