@@ -45,6 +45,7 @@
 #include <limits>
 #include <cstdint>
 #include <math.h>
+#include <array>
 
 
 /**********************/
@@ -78,7 +79,7 @@ typedef char bool;
 typedef struct lfo {
 	float r, i, a;
 } lfo;
-#define LFOINIT(f) ((lfo){1.f, 0.f, (f) + (f)})
+#define LFOINIT(f) (lfo {1.f, 0.f, (f) + (f)})
 void lfo_setfreq(lfo *l, float f) {
 	l->a = f + f;
 }

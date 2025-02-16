@@ -20,8 +20,10 @@ endif
 default: $(CHUG_BIN)
 
 $(CHUG_BIN): 
-	$(MSBUILD) /p:Configuration=$(CONFIG) 
+	$(MSBUILD) /p:Configuration=$(CONFIG) /property:Platform=x64
+	cp ./x64/Release/PlinkyRev.chug ./
 
 clean:
 	$(MSBUILD) /p:Configuration=$(CONFIG) /t:Clean
+	rm PlinkyRev.chug
 
