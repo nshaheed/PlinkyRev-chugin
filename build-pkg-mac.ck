@@ -10,10 +10,10 @@ PlinkyRev.version() => string version;
 Package pkg("PlinkyRev");
 
 // Add our metadata...
-"Spencer Salazar" => pkg.authors;
+"Nick Shaheed" => pkg.authors;
 
-"https://github.com/ccrma/chugins" => pkg.homepage;
-"https://github.com/ccrma/chugins" => pkg.repository;
+"https://github.com/nshaheed/PlinkyRev-chugin/" => pkg.homepage;
+"https://github.com/nshaheed/PlinkyRev-chugin/" => pkg.repository;
 
 "MIT" => pkg.license;
 "This stereo reverb is a port of the Plinky synth's reverb (https://plinkysynth.com/)" => pkg.description;
@@ -40,12 +40,9 @@ PackageVersion ver("PlinkyRev", version);
 ver.addFile("./PlinkyRev.chug");
 
 // These build files are examples as well
-ver.addExampleFile("FluidSynth-play.ck");
-ver.addExampleFile("fluidsynth-help.ck");
-ver.addExampleFile("fluidsynth-pitchbend.ck");
-ver.addExampleFile("fluidsynth-tuning.ck");
-ver.addExampleFile("fluidsynth-test.ck");
-ver.addExampleFile("HS_African_Percussion.sf2");
+ver.addExampleFile("blit.ck");
+ver.addExampleFile("sin.ck");
+ver.addExampleFile("help.ck");
 
 // The version path
 "chugins/PlinkyRev/" + ver.version() + "/" + ver.os() + "/PlinkyRev.zip" => string path;
