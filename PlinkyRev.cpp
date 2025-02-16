@@ -152,15 +152,27 @@ s16 LINEARINTERPRV(const s16* buf, int basei, int wobpos) { // read buf[basei-wo
 
 // declaration of chugin constructor
 CK_DLL_CTOR( plinkyrev_ctor );
+CK_DLL_CTOR( plinkyrev_ctor_mix );
 // declaration of chugin desctructor
 CK_DLL_DTOR( plinkyrev_dtor );
 
-// example of getter/setter
-CK_DLL_MFUN( plinkyrev_setParam );
-CK_DLL_MFUN( plinkyrev_getParam );
+CK_DLL_MFUN( plinkyrev_setFade );
+CK_DLL_MFUN( plinkyrev_getFade );
+
+CK_DLL_MFUN( plinkyrev_setShim );
+CK_DLL_MFUN( plinkyrev_getShim );
+
+CK_DLL_MFUN( plinkyrev_setWobble );
+CK_DLL_MFUN( plinkyrev_getWobble );
+
+CK_DLL_MFUN( plinkyrev_setSend );
+CK_DLL_MFUN( plinkyrev_getSend );
+
+CK_DLL_MFUN( plinkyrev_setMix );
+CK_DLL_MFUN( plinkyrev_getMix );
 
 // for chugins extending UGen, this is mono synthesis function for 1 sample
-CK_DLL_TICK( plinkyrev_tick );
+CK_DLL_TICKF( plinkyrev_tickf );
 
 // this is a special offset reserved for chugin internal data
 t_CKINT plinkyrev_data_offset = 0;
@@ -174,52 +186,41 @@ class PlinkyRev
 {
 public:
   // constructor
-  PlinkyRev( t_CKFLOAT fs )
+  PlinkyRev( t_CKFLOAT mix )
   {
-    // float f = 0.3;
-    // std::cout << 1.f-f << std::endl;
-    
     m_param = 0;
-    
+
     reverbpos = 0;
 
     // k is our kontrolable parameters
-
-    /*
-      // some weird, probably iterative param setting
-      // https://github.com/plinkysynth/plinky_public/blob/main/sw/Core/Src/plinky.c#L2261C1-L2263C35
-      float f=1.f-clampf(param_eval_float(P_RVTIME, any_rnd, env16, pressure16),0.f,1.f);
-      /* 1- (param ranging from 0 to 1)
-      f*=f; f*=f; // f^3?
-      k_reverb_fade=(int)(250*(1.f-f));
-     */
     k_reverb_fade = 240;
     k_reverb_shim = 128; // not signed (0, 65536) >> 9 -> (0, 128)
     k_reverb_wob = 0.5f; // (0.0,1.0)
-    k_reverbsend = 0;
-    // k_reverbsend = std::numeric_limits<int>::max() / 64000;
-    k_reverbsend = 32768;
-    k_reverbsend = 65536; // not signed (0, 65536)
-    // k_reverbsend = std::numeric_limits<int>::max() / 2;
+    k_reverbsend = 65536 / 4; // not signed (0, 65536)
+
     shimmerpos1 = 2000;
     shimmerpos2 = 1000;
     shimmerfade = 0;
-    // shimmerfade = 300;
     dshimmerfade = 32768/4096;
 
     aplfo = LFOINIT(1.f / 32777.f * 9.4f);
     aplfo2 = LFOINIT(1.3f / 32777.f * 3.15971f);
 
+    // reverb mix
+    m_mix = mix;
+
     // set reverb buffer
     buf = new s16[RVMASK+1];
 
-    counter = 0;
+    // initialize buffer
+    for (int i=0; i < RVMASK+1; i++) {
+      buf[i] = 0;
+    }
   }
 
   // for chugins extending UGen
-  SAMPLE tick( SAMPLE in )
+  std::array<SAMPLE, 2> tick( SAMPLE in_left, SAMPLE in_right )
   {
-
     // the original reverb algorithm is processing a 32-bit signed
     // int (s32) sample input, and a 16-bit signed int reverb
     // buffer. We need to convert ChucK's double-based samples to an
@@ -228,11 +229,14 @@ public:
     // Reference: https://stackoverflow.com/questions/13126297/c-c-how-to-convert-from-a-signed-32bit-integer-to-a-float-and-back
 
     // clamp input to range [-1, 1]
-    in = fmax(in, -1.0);
-    in = fmin(in, 1.0);
+    in_left = fmax(in_left, -1.0);
+    in_left = fmin(in_left, 1.0);
 
-    counter += 800 * (1.0 / 44100.0);
-    double in_d = 0.0000309 * sin(counter); // hmmmmmm
+    in_right = fmax(in_right, -1.0);
+    in_right = fmin(in_right, 1.0);
+
+    // counter += 800 * (1.0 / 44100.0);
+    // double in_d = 0.0000309 * sin(counter); // hmmmmmm
 
     // double d_in = in;
 
@@ -241,13 +245,13 @@ public:
     // s32 input = in * (INT64_MAX + 0.5);
 
     // in = in * 0.000109;
-    s16 inptl = ((double)in) * 0x7FFF;
-    s16 inptr = ((double)in) * 0x7FFF;
+    s16 inptl = ((double)in_left) * 0x7FFF;
+    s16 inptr = ((double)in_right) * 0x7FFF;
 
     // s16 inptl = (in_d) * 0x7FFF;
     // s16 inptr = (in_d) * 0x7FFF;
 
-    
+
 
     // s32 input = ((double)in) * 0x7FFFFFF;
     s32 input = STEREOPACK(inptl, inptr);
@@ -267,7 +271,7 @@ public:
 
 	// SAMPLE test_output = outl / ((float) 0x7FFF);
 	// return test_output;
-	
+
 	float wob = lfo_next(&aplfo) * k_reverb_wob;
 	int apwobpos = FLOAT2FIXED((wob + 1.f), 12 + 6);
 	wob = lfo_next(&aplfo2)  * k_reverb_wob;
@@ -275,7 +279,7 @@ public:
 
     // SAMPLE test_output = outl / ((float) 0x7FFF);
     // return test_output;
-	
+
 #define RVDIV /2
 #define CHECKACC // assert(acc>=-32768 && acc<32767);
 #define AP(len) { \
@@ -326,7 +330,7 @@ public:
 	// lets try the 4 greisinger initial Aps, inject stereo after the first AP,
 
     // SAMPLE test_output = outl / ((float) 0x7FFF);
-    // return test_output;	
+    // return test_output;
 
 	int acc = ((s16)(input)) * k_reverbsend >> 17;
 	AP(142);
@@ -402,7 +406,7 @@ public:
 		outr = shimo;
 
 		// SAMPLE test_output = outl / ((float) 0x7FFF);
-		// return test_output;		
+		// return test_output;
 
 		shimmerpos1--;
 		shimmerpos2--;
@@ -411,10 +415,10 @@ public:
 
 	// these isn't referenced anywhere else in the codebase?
 	const static float k_reverb_color = 0.95f;
-	static float lpf = 0.f, dc = 0.f;	
-	// const float k_reverb_color = 0.95f;	
+	static float lpf = 0.f, dc = 0.f;
+	// const float k_reverb_color = 0.95f;
 	// float lpf = 0.f, dc = 0.f;
-	
+
 	lpf += (((acc * k_reverb_fade) >> 8) - lpf) * k_reverb_color;
 	dc += (lpf - dc) * 0.005f;
 	acc = (int)(lpf - dc);
@@ -439,7 +443,7 @@ public:
 	s32 return_val = STEREOPACK(SATURATE16(outl), SATURATE16(outr));
 
 	// SAMPLE test_output = outl / ((float) 0x7FFF);
-	// return test_output;	
+	// return test_output;
 
 
 
@@ -453,24 +457,86 @@ public:
 	// SAMPLE output = return_val / ((float) 0x7FFFFFF);
     // SAMPLE output = return_val / (INT64_MAX + 0.5);
 	// outl = (outl >> 8) << 8;
-	SAMPLE output = outl / ((float) 0x7FFF);
-    return output;
+	SAMPLE output_l = outl / ((float) 0x7FFF);
+	SAMPLE output_r = outr / ((float) 0x7FFF);
+
+	output_l = (output_l * m_mix) + (in_left * (1.f-m_mix));
+	output_r = (output_r * m_mix) + (in_right * (1.f-m_mix));
+
+	std::array<SAMPLE, 2> output;
+	output[0] = output_l;
+	output[1] = output_r;
+	return output;
     // return  in_d;
   }
 
-  // set parameter example
-  t_CKFLOAT setParam( t_CKFLOAT p )
-  {
-    m_param = p;
-    return p;
+  t_CKFLOAT setFade( t_CKFLOAT fade ) {
+    // clamp to 0-1
+    fadef = clamp(fade, 0.0, 1.0); // needed for returning mostly
+
+    // some weird, probably iterative param setting
+    // https://github.com/plinkysynth/plinky_public/blob/main/sw/Core/Src/plinky.c#L2261C1-L2263C35
+    float f = 1.f - fadef;
+    f*=f;
+    f*=f;
+    k_reverb_fade=(int)(250*(1.f-f));
+
+    return fadef;
   }
 
-  // get parameter example
-  t_CKFLOAT getParam() { return m_param; }
+  t_CKFLOAT getFade() { return fadef; }
+
+  t_CKFLOAT setShim( t_CKFLOAT shim) {
+    shim = clamp(shim, 0, 1);
+
+    k_reverb_shim = (int)(shim * 128.0);
+
+    return shim;
+  }
+
+  t_CKFLOAT getShim() {
+    return (float)k_reverb_shim / 128.f;
+  }
+
+  t_CKFLOAT setWobble( t_CKFLOAT wob) {
+    k_reverb_wob = clamp(wob, 0, 1);
+
+    return k_reverb_wob;
+  }
+
+  t_CKFLOAT getWobble() {
+    return k_reverb_wob;
+  }
+
+  t_CKFLOAT setSend( t_CKFLOAT send ) {
+    send = clamp(send, 0, 1);
+
+    k_reverbsend = (int)(send * 65536);
+
+    return send;
+  }
+
+  t_CKFLOAT getSend() {
+    return (float)k_reverbsend / 65536.0;
+  }
+
+  t_CKFLOAT setMix( t_CKFLOAT mix ) {
+    m_mix = clamp(mix, 0, 1);
+    return m_mix;
+  }
+
+  t_CKFLOAT getMix() {
+    return m_mix;
+  }
+
+  static t_CKFLOAT clamp(t_CKFLOAT x, t_CKFLOAT low, t_CKFLOAT high) {
+    return std::min(std::max(x, low), high);
+  }
 
 private:
   // instance data
   t_CKFLOAT m_param;
+  t_CKFLOAT m_mix;
 
   // Our params. All of these are static in the original
   // implementation. Presumably because the's only one global reverb
@@ -478,6 +544,7 @@ private:
 
   int reverbpos;
 
+  t_CKFLOAT fadef;
   int k_reverb_fade;
   int k_reverb_shim;
   float k_reverb_wob;
@@ -488,7 +555,7 @@ private:
   int dshimmerfade;
 
   lfo aplfo;
-  lfo aplfo2;  
+  lfo aplfo2;
   // lfo aplfo = LFOINIT(1.f / 32777.f * 9.4f);
   // lfo aplfo2 = LFOINIT(1.3f / 32777.f * 3.15971f);
 
@@ -508,15 +575,15 @@ private:
 CK_DLL_INFO( PlinkyRev )
 {
   // the version string of this chugin, e.g., "v1.2.1"
-  QUERY->setinfo( QUERY, CHUGIN_INFO_CHUGIN_VERSION, "" );
+  QUERY->setinfo( QUERY, CHUGIN_INFO_CHUGIN_VERSION, "1.0.0" );
   // the author(s) of this chugin, e.g., "Alice Baker & Carl Donut"
-  QUERY->setinfo( QUERY, CHUGIN_INFO_AUTHORS, "" );
+  QUERY->setinfo( QUERY, CHUGIN_INFO_AUTHORS, "Nick Shaheed" );
   // text description of this chugin; what is it? what does it do? who is it for?
-  QUERY->setinfo( QUERY, CHUGIN_INFO_DESCRIPTION, "" );
+  QUERY->setinfo( QUERY, CHUGIN_INFO_DESCRIPTION, "This stereo reverb is a port of the Plinky synth's reverb (https://plinkysynth.com/)" );
   // (optional) URL of the homepage for this chugin
   QUERY->setinfo( QUERY, CHUGIN_INFO_URL, "" );
   // (optional) contact email
-  QUERY->setinfo( QUERY, CHUGIN_INFO_EMAIL, "" );
+  QUERY->setinfo( QUERY, CHUGIN_INFO_EMAIL, "nshaheed@ccrma.stanford.edu" );
 }
 
 
@@ -535,7 +602,7 @@ CK_DLL_QUERY( PlinkyRev )
   // ------------------------------------------------------------------------
   // NOTE to create a non-UGen class, change the second argument
   // to extend a different ChucK class (e.g., "Object")
-  QUERY->begin_class( QUERY, "PlinkyRev", "UGen" );
+  QUERY->begin_class( QUERY, "PlinkyRev", "UGen_Stereo" );
 
   // register default constructor
   QUERY->add_ctor( QUERY, plinkyrev_ctor );
@@ -543,23 +610,69 @@ CK_DLL_QUERY( PlinkyRev )
   // each overloaded constructor begins with `QUERY->add_ctor()`
   // followed by a sequence of `QUERY->add_arg()`
 
+  QUERY->add_ctor( QUERY, plinkyrev_ctor_mix );
+  QUERY->add_arg( QUERY, "float", "mix" );
+
   // register the destructor (probably no need to change)
   QUERY->add_dtor( QUERY, plinkyrev_dtor );
 
   // for UGens only: add tick function
   // NOTE a non-UGen class should remove or comment out this next line
-  QUERY->add_ugen_func( QUERY, plinkyrev_tick, NULL, 1, 1 );
+  QUERY->add_ugen_funcf( QUERY, plinkyrev_tickf, NULL, 2, 2 );
   // NOTE: if this is to be a UGen with more than 1 channel,
   // e.g., a multichannel UGen -- will need to use add_ugen_funcf()
   // and declare a tickf function using CK_DLL_TICKF
 
   // example of adding setter method
-  QUERY->add_mfun( QUERY, plinkyrev_setParam, "float", "param" );
+  QUERY->add_mfun( QUERY, plinkyrev_setFade, "float", "fade" );
   // example of adding argument to the above method
-  QUERY->add_arg( QUERY, "float", "arg" );
+  QUERY->add_arg( QUERY, "float", "fade" );
+  QUERY->doc_func(QUERY, "Controls the length of the decay of the reverb. [0-1].");
+
 
   // example of adding getter method
-  QUERY->add_mfun( QUERY, plinkyrev_getParam, "float", "param" );
+  QUERY->add_mfun( QUERY, plinkyrev_getFade, "float", "fade" );
+  QUERY->doc_func(QUERY, "Controls the length of the decay of the reverb. [0-1].");
+
+  // example of adding setter method
+  QUERY->add_mfun( QUERY, plinkyrev_setShim, "float", "shim" );
+  // example of adding argument to the above method
+  QUERY->add_arg( QUERY, "float", "shim" );
+  QUERY->doc_func(QUERY, "Amount of octave-up signal that is fed into the reverb, causing a shimmer effect. [0-1].");
+
+  // example of adding getter method
+  QUERY->add_mfun( QUERY, plinkyrev_getShim, "float", "shim" );
+  QUERY->doc_func(QUERY, "Amount of octave-up signal that is fed into the reverb, causing a shimmer effect. [0-1].");
+
+  // example of adding setter method
+  QUERY->add_mfun( QUERY, plinkyrev_setWobble, "float", "wobble" );
+  // example of adding argument to the above method
+  QUERY->add_arg( QUERY, "float", "wobble" );
+  QUERY->doc_func(QUERY, "Amount of simulated tape speed wobble, causing pitch distortions in the reverb. [0-1].");
+
+  // example of adding getter method
+  QUERY->add_mfun( QUERY, plinkyrev_getWobble, "float", "wobble" );
+  QUERY->doc_func(QUERY, "Amount of simulated tape speed wobble, causing pitch distortions in the reverb. [0-1].");
+
+  // example of adding setter method
+  QUERY->add_mfun( QUERY, plinkyrev_setSend, "float", "send" );
+  // example of adding argument to the above method
+  QUERY->add_arg( QUERY, "float", "send" );
+  QUERY->doc_func(QUERY, "Amount of the dry sound sent to the reverb unit. Turn it up for reverb! [0-1].");
+
+  // example of adding getter method
+  QUERY->add_mfun( QUERY, plinkyrev_getSend, "float", "send" );
+  QUERY->doc_func(QUERY, "Amount of the dry sound sent to the reverb unit. Turn it up for reverb! [0-1].");
+
+  // example of adding setter method
+  QUERY->add_mfun( QUERY, plinkyrev_setMix, "float", "mix" );
+  // example of adding argument to the above method
+  QUERY->add_arg( QUERY, "float", "mix" );
+  QUERY->doc_func(QUERY, "Set reverb wet/dry mix, 0 is dry, 1 is wet [0-1].");
+
+  // example of adding getter method
+  QUERY->add_mfun( QUERY, plinkyrev_getMix, "float", "mix" );
+  QUERY->doc_func(QUERY, "Get reverb wet/dry mix, 0 is dry, 1 is wet [0-1].");
 
   // this reserves a variable in the ChucK internal class to store
   // referene to the c++ class we defined above
@@ -583,7 +696,22 @@ CK_DLL_CTOR( plinkyrev_ctor )
   OBJ_MEMBER_INT( SELF, plinkyrev_data_offset ) = 0;
 
   // instantiate our internal c++ class representation
-  PlinkyRev * pr_obj = new PlinkyRev( API->vm->srate(VM) );
+  PlinkyRev * pr_obj = new PlinkyRev( 0.5 );
+
+  // store the pointer in the ChucK object member
+  OBJ_MEMBER_INT( SELF, plinkyrev_data_offset ) = (t_CKINT)pr_obj;
+}
+
+// implementation for the default constructor
+CK_DLL_CTOR( plinkyrev_ctor_mix )
+{
+  // get the offset where we'll store our internal c++ class pointer
+  OBJ_MEMBER_INT( SELF, plinkyrev_data_offset ) = 0;
+
+  t_CKFLOAT arg1 = GET_NEXT_FLOAT( ARGS );
+
+  // instantiate our internal c++ class representation
+  PlinkyRev * pr_obj = new PlinkyRev( arg1 );
 
   // store the pointer in the ChucK object member
   OBJ_MEMBER_INT( SELF, plinkyrev_data_offset ) = (t_CKINT)pr_obj;
@@ -603,21 +731,26 @@ CK_DLL_DTOR( plinkyrev_dtor )
 
 
 // implementation for tick function (relevant only for UGens)
-CK_DLL_TICK( plinkyrev_tick )
+CK_DLL_TICKF( plinkyrev_tickf )
 {
   // get our c++ class pointer
   PlinkyRev * pr_obj = (PlinkyRev *)OBJ_MEMBER_INT(SELF, plinkyrev_data_offset);
 
-  // invoke our tick function; store in the magical out variable
-  if( pr_obj ) *out = pr_obj->tick( in );
+  for (int i = 0; i < nframes; i++) {
+    SAMPLE in_left = in[i * 2 + 0];
+    SAMPLE in_right = in[i * 2 + 1];
+    // invoke our tick function; store in the magical out variable
+    std::array<SAMPLE, 2> pluck_out = pr_obj->tick( in_left, in_right );
+    out[i * 2 + 0] = pluck_out[0];
+    out[i * 2 + 1] = pluck_out[1];
+  }
 
   // yes
   return TRUE;
 }
 
 
-// example implementation for setter
-CK_DLL_MFUN( plinkyrev_setParam )
+CK_DLL_MFUN( plinkyrev_setFade )
 {
   // get our c++ class pointer
   PlinkyRev * pr_obj = (PlinkyRev *)OBJ_MEMBER_INT( SELF, plinkyrev_data_offset );
@@ -627,17 +760,108 @@ CK_DLL_MFUN( plinkyrev_setParam )
   // NOTE this advances the ARGS pointer, so save in variable for re-use
   t_CKFLOAT arg1 = GET_NEXT_FLOAT( ARGS );
 
-  // call setParam() and set the return value
-  RETURN->v_float = pr_obj->setParam( arg1 );
+  // call setFade() and set the return value
+  RETURN->v_float = pr_obj->setFade( arg1 );
 }
 
-
-// example implementation for getter
-CK_DLL_MFUN(plinkyrev_getParam)
+CK_DLL_MFUN(plinkyrev_getFade)
 {
   // get our c++ class pointer
   PlinkyRev * pr_obj = (PlinkyRev *)OBJ_MEMBER_INT( SELF, plinkyrev_data_offset );
 
-  // call getParam() and set the return value
-  RETURN->v_float = pr_obj->getParam();
+  // call getFade() and set the return value
+  RETURN->v_float = pr_obj->getFade();
+}
+
+
+CK_DLL_MFUN( plinkyrev_setShim )
+{
+  // get our c++ class pointer
+  PlinkyRev * pr_obj = (PlinkyRev *)OBJ_MEMBER_INT( SELF, plinkyrev_data_offset );
+
+  // get next argument
+  // NOTE argument type must match what is specified above in CK_DLL_QUERY
+  // NOTE this advances the ARGS pointer, so save in variable for re-use
+  t_CKFLOAT arg1 = GET_NEXT_FLOAT( ARGS );
+
+  // call setShim() and set the return value
+  RETURN->v_float = pr_obj->setShim( arg1 );
+}
+
+CK_DLL_MFUN(plinkyrev_getShim)
+{
+  // get our c++ class pointer
+  PlinkyRev * pr_obj = (PlinkyRev *)OBJ_MEMBER_INT( SELF, plinkyrev_data_offset );
+
+  // call getShim() and set the return value
+  RETURN->v_float = pr_obj->getShim();
+}
+
+CK_DLL_MFUN( plinkyrev_setWobble )
+{
+  // get our c++ class pointer
+  PlinkyRev * pr_obj = (PlinkyRev *)OBJ_MEMBER_INT( SELF, plinkyrev_data_offset );
+
+  // get next argument
+  // NOTE argument type must match what is specified above in CK_DLL_QUERY
+  // NOTE this advances the ARGS pointer, so save in variable for re-use
+  t_CKFLOAT arg1 = GET_NEXT_FLOAT( ARGS );
+
+  // call setWobble() and set the return value
+  RETURN->v_float = pr_obj->setWobble( arg1 );
+}
+
+CK_DLL_MFUN(plinkyrev_getWobble)
+{
+  // get our c++ class pointer
+  PlinkyRev * pr_obj = (PlinkyRev *)OBJ_MEMBER_INT( SELF, plinkyrev_data_offset );
+
+  // call getWobble() and set the return value
+  RETURN->v_float = pr_obj->getWobble();
+}
+
+CK_DLL_MFUN( plinkyrev_setSend )
+{
+  // get our c++ class pointer
+  PlinkyRev * pr_obj = (PlinkyRev *)OBJ_MEMBER_INT( SELF, plinkyrev_data_offset );
+
+  // get next argument
+  // NOTE argument type must match what is specified above in CK_DLL_QUERY
+  // NOTE this advances the ARGS pointer, so save in variable for re-use
+  t_CKFLOAT arg1 = GET_NEXT_FLOAT( ARGS );
+
+  // call setSend() and set the return value
+  RETURN->v_float = pr_obj->setSend( arg1 );
+}
+
+CK_DLL_MFUN(plinkyrev_getSend)
+{
+  // get our c++ class pointer
+  PlinkyRev * pr_obj = (PlinkyRev *)OBJ_MEMBER_INT( SELF, plinkyrev_data_offset );
+
+  // call getSend() and set the return value
+  RETURN->v_float = pr_obj->getSend();
+}
+
+CK_DLL_MFUN( plinkyrev_setMix )
+{
+  // get our c++ class pointer
+  PlinkyRev * pr_obj = (PlinkyRev *)OBJ_MEMBER_INT( SELF, plinkyrev_data_offset );
+
+  // get next argument
+  // NOTE argument type must match what is specified above in CK_DLL_QUERY
+  // NOTE this advances the ARGS pointer, so save in variable for re-use
+  t_CKFLOAT arg1 = GET_NEXT_FLOAT( ARGS );
+
+  // call setMix() and set the return value
+  RETURN->v_float = pr_obj->setMix( arg1 );
+}
+
+CK_DLL_MFUN(plinkyrev_getMix)
+{
+  // get our c++ class pointer
+  PlinkyRev * pr_obj = (PlinkyRev *)OBJ_MEMBER_INT( SELF, plinkyrev_data_offset );
+
+  // call getMix() and set the return value
+  RETURN->v_float = pr_obj->getMix();
 }
